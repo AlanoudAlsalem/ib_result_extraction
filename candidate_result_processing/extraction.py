@@ -175,8 +175,28 @@ def extract_results(pdf_file):
 
 directory = "candidate_result_processing"
 pdf_file_path = os.path.join(directory, "candidate_results_2024.pdf")
-courses_students, diploma_students = extract_results("/Users/alanoud/dev/AA/candidate_result_processing/candidate_results_2024.pdf")
+# courses_students, diploma_students = extract_results("/Users/alanoud/dev/AA/candidate_result_processing/candidate_results_2024.pdf")
 
+# --------------------------- Streamlit App --------------------------- #
+
+st.title("📄 IB Results Extractor to Excel")
+
+uploaded_file = st.file_uploader("Upload a Candidate Results PDF", type=["pdf"])
+
+if uploaded_file:
+    with st.spinner("Processing PDF..."):
+        courses_students, diploma_students = extract_results(uploaded_file)
+        excel_path = "output.xlsx"
+
+    st.success("✅ Results extracted successfully!")
+    with open(excel_path, "rb") as file:
+        st.download_button(
+            label="📥 Download Excel File",
+            data=file,
+            file_name="extracted_results.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        
 workbook = xlsxwriter.Workbook('output.xlsx')
 worksheet = workbook.add_worksheet()
 
@@ -273,26 +293,6 @@ for student in courses_students:
     row += 1
 
 workbook.close()
-
-# --------------------------- Streamlit App --------------------------- #
-
-st.title("📄 IB Results Extractor to Excel")
-
-uploaded_file = st.file_uploader("Upload a Candidate Results PDF", type=["pdf"])
-
-if uploaded_file:
-    with st.spinner("Processing PDF..."):
-        courses_students, diploma_students = extract_results(uploaded_file)
-        excel_path = "output.xlsx"
-
-    st.success("✅ Results extracted successfully!")
-    with open(excel_path, "rb") as file:
-        st.download_button(
-            label="📥 Download Excel File",
-            data=file,
-            file_name="extracted_results.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
 
 # ---- Analytics Dashboard ----
 st.header("📊 Analytics Dashboard")
