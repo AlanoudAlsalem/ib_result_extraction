@@ -2,6 +2,8 @@ import os
 import PyPDF2
 import xlsxwriter
 import streamlit as st
+import pandas as pd
+import altair as alt
 
 def courses_extraction(newline_count, content, letter):
     subjects_temp = ["", "", "", "", "", ""]
@@ -291,3 +293,102 @@ if uploaded_file:
             file_name="extracted_results.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+
+# ---- Analytics Dashboard ----
+st.header("📊 Analytics Dashboard")
+
+def calculate_bonus(tok_grade, ee_grade):
+    # Normalize to uppercase
+    tok = tok_grade.strip().upper()
+    ee = ee_grade.strip().upper()
+
+    # Define rules as a set of tuples
+    bonus_3 = {("A", "A"), ("A", "B"), ("B", "A")}
+    bonus_2 = {("B", "B"), ("A", "C"), ("C", "A"), ("A", "D"), ("D", "A")}
+    bonus_1 = {("A", "E"), ("E", "A"), ("B", "D"), ("D", "B"), ("B", "C"), ("C", "B"), ("C", "C")}
+
+    pair = (tok, ee)
+
+    if pair in bonus_3:
+        return 3
+    elif pair in bonus_2:
+        return 2
+    elif pair in bonus_1:
+        return 1
+    else:
+        return 0
+    
+# Helper function to compute total points from subject scores
+def calculate_total(subjects_dict, is_diploma=True):
+    total = 0
+    for subject, score in subjects_dict.items():
+        if subject[-2:] == "TK":
+            tok_grade = score
+        if subject[-2:] == "EE":
+            ee_grade = score
+        try:
+            total += int(score)
+        except:
+            continue
+
+    if is_diploma:
+        total += calculate_bonus(tok_grade, ee_grade)
+
+    return total
+
+# Compute scores
+diploma_totals = [calculate_total(s, is_diploma=True) for s in diploma_students.values()]
+courses_totals = [calculate_total(s, is_diploma=False) for s in courses_students.values()]
+
+if diploma_totals:
+    avg_diploma = sum(diploma_totals) / len(diploma_totals)
+    st.metric("🎓 Avg Diploma Score", f"{avg_diploma:.2f}")
+else:
+    st.info("No Diploma student data found.")
+
+if courses_totals:
+    avg_courses = sum(courses_totals) / len(courses_totals)
+    st.metric("📚 Avg Courses Score", f"{avg_courses:.2f}")
+else:
+    st.info("No Courses student data found.")
+
+# Cumulative count for high scores (Diploma only)
+score_thresholds = list(range(40, 46))  # 40 to 45
+threshold_counts = {
+    f"{threshold}+": sum(score >= threshold for score in diploma_totals)
+    for threshold in score_thresholds
+}
+
+st.subheader("📈 Diploma Students Scoring 40+ to 45")
+
+# Create a DataFrame for plotting
+threshold_df = pd.DataFrame.from_dict(threshold_counts, orient='index', columns=['Number of Students']).reset_index()
+threshold_df.rename(columns={"index": "Threshold"}, inplace=True)
+
+# Create a line chart with a custom color
+line_chart = alt.Chart(threshold_df).mark_line(point=True, color="#30CDD7").encode(
+    x=alt.X('Threshold', title='Score Threshold'),
+    y=alt.Y('Number of Students', title='Number of Students'),
+    tooltip=['Threshold', 'Number of Students']
+).properties(
+    width=600,
+    height=400,
+    title="Diploma Students Scoring 40+ to 45"
+)
+
+st.altair_chart(line_chart, use_container_width=True)
+
+# Create leaderboard DataFrames
+def generate_leaderboard(students_dict, totals, label):
+    data = []
+    for name, total in zip(students_dict.keys(), totals):
+        data.append({"Student": name, "Total Points": total})
+    df = pd.DataFrame(data).sort_values("Total Points", ascending=False).reset_index(drop=True)
+    st.subheader(f"🏅 Top {label} Performers")
+    st.dataframe(df.head(10), use_container_width=True)  # Show top 10
+
+if diploma_totals:
+    generate_leaderboard(diploma_students, diploma_totals, "Diploma")
+    
+if courses_totals:
+    generate_leaderboard(courses_students, courses_totals, "Courses")
