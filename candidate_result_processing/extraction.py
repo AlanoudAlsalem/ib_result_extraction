@@ -202,7 +202,7 @@ def get_average_subject_score(students, is_diploma):
         return total_score / count if count else 0
 
 # ------------------ Streamlit App ------------------ #
-st.title("🥭 IB Results Extractor to Excel")
+st.title("📚 IB Results Extractor to Excel")
 
 uploaded_file = st.file_uploader("Upload a Candidate Results PDF", type=["pdf"])
 if uploaded_file:
