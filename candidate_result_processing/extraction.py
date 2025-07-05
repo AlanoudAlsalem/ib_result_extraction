@@ -83,7 +83,7 @@ def extract_results(pdf_file):
         
         if level.group().lower() == 'course':
             subjects = courses_extraction(content)
-            if not subjects:
+            if subjects == {}:
                 st.error(f"❌ ERROR extracting {full_name} -> EXCLUDED")
             else: 
                 courses_students[full_name] = subjects
@@ -93,7 +93,7 @@ def extract_results(pdf_file):
                 student_data = pd.concat([student_data, pd.DataFrame([new_row])], ignore_index=True)
         elif level.group().lower() == 'diploma':
             subjects = diploma_extraction(content)
-            if not subjects:
+            if subjects == {}:
                 st.error(f"❌ ERROR extracting {full_name} -> EXCLUDED")
             else: 
                 diploma_students[full_name] = subjects
@@ -163,9 +163,8 @@ def create_excel_file(diploma_students, courses_students):
 def calculate_bonus(tok, ee):
     tok, ee = tok.strip().upper(), ee.strip().upper()
     bonus_3 = {("A", "A"), ("A", "B"), ("B", "A")}
-    bonus_2 = {("B", "B"), ("A", "C"), ("C", "A"), ("A", "D"), ("D", "A")}
-    bonus_1 = {("A", "E"), ("E", "A"), ("B", "D"), ("D", "B"),
-               ("B", "C"), ("C", "B"), ("C", "C")}
+    bonus_2 = {("B", "B"), ("A", "C"), ("C", "A"), ("A", "D"), ("D", "A"), ("B", "C"), ("C", "B")}
+    bonus_1 = {("B", "D"), ("D", "B"), ("C", "C")}
     return 3 if (tok, ee) in bonus_3 else 2 if (tok, ee) in bonus_2 else 1 if (tok, ee) in bonus_1 else 0
 
 def calculate_total(subjects, is_diploma=True):
@@ -240,7 +239,7 @@ if uploaded_file:
 
     diploma_totals = [calculate_total(s, True) for s in diploma_students.values()]
     courses_totals = [calculate_total(s, False) for s in courses_students.values()]
-
+    
     col1, col2 = st.columns(2)
     if diploma_totals:
         with col1:
