@@ -12,7 +12,10 @@ def courses_extraction(content):
     
     grade_pattern = r'([1-7]\n){5}[1-7]'
     grade_string = re.search(grade_pattern, content)
-    grades = grade_string.group().split()
+    if grade_string:
+        grades = grade_string.group().split()
+    else:
+        return subjects
 
     subject_pattern = r'^MAY.+(?:SL|HL).+\n'
     subject_string = re.findall(subject_pattern, content, re.IGNORECASE | re.MULTILINE)
@@ -36,7 +39,10 @@ def diploma_extraction(content):
     
     grade_pattern = r'(?:[1-7A-E]\n){7}[1-7A-E]'
     grade_string = re.search(grade_pattern, content)
-    grades = grade_string.group().split()
+    if grade_string:
+        grades = grade_string.group().split()
+    else:
+        return subjects
 
     subject_pattern = r'^MAY.+(?:SL|HL|TK|EE).+\n'
     subject_string = re.findall(subject_pattern, content, re.IGNORECASE | re.MULTILINE)
