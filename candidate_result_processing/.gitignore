@@ -1,0 +1,21 @@
+# Node / Next.js
+node_modules/
+.next/
+out/
+next-env.d.ts
+
+# Vercel
+.vercel/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Local test fixtures / scratch files
+*.xlsx
+*.pdf
+extraction.ipynb
+
+# OS
+.DS_Store

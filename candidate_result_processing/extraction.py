@@ -6,11 +6,29 @@ import xlsxwriter
 import io
 import re
 
+# Valid grade sets for post-extraction anomaly detection
+_VALID_SUBJECT_GRADES = {str(i) for i in range(1, 8)}
+_VALID_TOK_EE_GRADES  = set("ABCDE")
+
+def _safe_int(value):
+    """Convert to int; returns the original value unchanged if conversion fails."""
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return value
+
 # ------------------ PDF Extraction Logic ------------------ #
+
 def courses_extraction(content):
+    """Extract course subjects and grades.
+
+    Uses a broad grade pattern (\w per line) so unexpected marks such as
+    'U', 'W', '0', '8' are captured rather than causing a silent miss.
+    """
     subjects = {}
-    
-    grade_pattern = r'([1-7]\n){5}[1-7]'
+
+    # Broad pattern: any single word-char per line, 6 consecutive lines
+    grade_pattern = r'(\w\n){5}\w'
     grade_string = re.search(grade_pattern, content)
     if grade_string:
         grades = grade_string.group().split()
@@ -22,22 +40,25 @@ def courses_extraction(content):
 
     if len(subject_string) != len(grades):
         return subjects
-    
-    i = 0
-    for subject in subject_string:
+
+    for i, subject in enumerate(subject_string):
         subject = str(subject).split('-')[-1].strip()
         subject = subject.split('in')[0].strip()
-
         subjects[subject] = grades[i]
-        i += 1
-    
+
     return subjects
-    
+
 
 def diploma_extraction(content):
+    """Extract diploma subjects and grades.
+
+    Uses a broad grade pattern (\w per line) so unexpected marks such as
+    'U', 'W', '0', '8' are captured rather than causing a silent miss.
+    """
     subjects = {}
-    
-    grade_pattern = r'(?:[1-7A-E]\n){7}[1-7A-E]'
+
+    # Broad pattern: any single word-char per line, 8 consecutive lines
+    grade_pattern = r'(\w\n){7}\w'
     grade_string = re.search(grade_pattern, content)
     if grade_string:
         grades = grade_string.group().split()
@@ -49,64 +70,107 @@ def diploma_extraction(content):
 
     if len(subject_string) != len(grades):
         return subjects
-    
-    i = 0
-    for subject in subject_string:
+
+    for i, subject in enumerate(subject_string):
         subject = str(subject).split('-')[-1].strip()
         subject = subject.split('in')[0].strip()
-
         subjects[subject] = grades[i]
-        i += 1
 
     return subjects
 
+
+def _validate_grades(subjects, full_name, is_diploma):
+    """Warn about any grade values that fall outside the expected IB range."""
+    for sub, grade in subjects.items():
+        is_tok_ee = is_diploma and sub[-2:] in ("TK", "EE")
+        if is_tok_ee:
+            if str(grade).upper() not in _VALID_TOK_EE_GRADES:
+                st.warning(f"⚠️ Unexpected TOK/EE grade '{grade}' for '{sub}' — {full_name} (included as-is)")
+        else:
+            if str(grade) not in _VALID_SUBJECT_GRADES:
+                st.warning(f"⚠️ Unexpected subject grade '{grade}' for '{sub}' — {full_name} (included as-is)")
+
+
+def _extract_name(content, page_num):
+    """Return (first_name, last_name, full_name) from page content."""
+    i = 0
+    newline_count = 0
+    flag = False
+    name = ""
+    for letter in content:
+        if content[i:i + 4] == "Name":
+            flag = True
+        if newline_count == 3:
+            name += letter
+        if newline_count > 3:
+            break
+        if flag and content[i] == '\n':
+            newline_count += 1
+        i += 1
+
+    parts = name.split(',')
+    if len(parts) >= 2:
+        first_name = parts[-1].strip()
+        last_name  = parts[0].strip()
+    else:
+        first_name = name.strip()
+        last_name  = ""
+
+    full_name = f"{first_name} {last_name}".strip() or f"Unknown (page {page_num + 1})"
+    return first_name, last_name, full_name
+
+
 def extract_results(pdf_file):
-    student_data = pd.DataFrame()
+    student_data    = pd.DataFrame()
     diploma_students = {}
     courses_students = {}
-    reader = PyPDF2.PdfReader(pdf_file)
-    for page in reader.pages:
-        content = page.extract_text()
-        level = re.search(r'\b(?:COURSE|DIPLOMA)\b', content, re.IGNORECASE)
-        i = 0
-        newline_count = 0
-        flag = False
-        name = ""
-        # name extraction
-        for letter in content:
-            if content[i:i + 4] == "Name":
-                flag = True
-            if newline_count == 3: name += letter
-            if newline_count > 3:
-                break
-            if flag and content[i] == '\n':
-                newline_count += 1
-            i += 1
 
-        first_name = name.split(',')[-1].strip()
-        last_name = name.split(',')[0].strip()
-        full_name = f"{first_name} {last_name}"
-        
-        if level.group().lower() == 'course':
-            subjects = courses_extraction(content)
-            if subjects == {}:
-                st.error(f"❌ ERROR extracting {full_name} -> EXCLUDED")
-            else: 
-                courses_students[full_name] = subjects
-                new_row = {'Name': full_name, 'Level': 'COURSES'}
-                for sub, grade in subjects.items():
-                    new_row[sub] = grade
-                student_data = pd.concat([student_data, pd.DataFrame([new_row])], ignore_index=True)
-        elif level.group().lower() == 'diploma':
-            subjects = diploma_extraction(content)
-            if subjects == {}:
-                st.error(f"❌ ERROR extracting {full_name} -> EXCLUDED")
-            else: 
-                diploma_students[full_name] = subjects
-                new_row = {'Name': full_name, 'Level': 'DIPLOMA'}
-                for sub, grade in subjects.items():
-                    new_row[sub] = grade
-                student_data = pd.concat([student_data, pd.DataFrame([new_row])], ignore_index=True)
+    try:
+        reader = PyPDF2.PdfReader(pdf_file)
+    except Exception as e:
+        st.error(f"❌ Could not open PDF: {e}")
+        return courses_students, diploma_students, student_data
+
+    for page_num, page in enumerate(reader.pages):
+        try:
+            content = page.extract_text()
+            if not content:
+                st.warning(f"⚠️ Page {page_num + 1} returned no text — skipped")
+                continue
+
+            level = re.search(r'\b(?:COURSE|DIPLOMA)\b', content, re.IGNORECASE)
+            if not level:
+                continue  # not a candidate result page
+
+            _, _, full_name = _extract_name(content, page_num)
+
+            if level.group().lower() == 'course':
+                subjects = courses_extraction(content)
+                if not subjects:
+                    st.error(f"❌ ERROR extracting {full_name} → EXCLUDED")
+                else:
+                    _validate_grades(subjects, full_name, is_diploma=False)
+                    courses_students[full_name] = subjects
+                    new_row = {'Name': full_name, 'Level': 'COURSES'}
+                    for sub, grade in subjects.items():
+                        new_row[sub] = grade
+                    student_data = pd.concat([student_data, pd.DataFrame([new_row])], ignore_index=True)
+
+            elif level.group().lower() == 'diploma':
+                subjects = diploma_extraction(content)
+                if not subjects:
+                    st.error(f"❌ ERROR extracting {full_name} → EXCLUDED")
+                else:
+                    _validate_grades(subjects, full_name, is_diploma=True)
+                    diploma_students[full_name] = subjects
+                    new_row = {'Name': full_name, 'Level': 'DIPLOMA'}
+                    for sub, grade in subjects.items():
+                        new_row[sub] = grade
+                    student_data = pd.concat([student_data, pd.DataFrame([new_row])], ignore_index=True)
+
+        except Exception as e:
+            st.warning(f"⚠️ Unexpected error on page {page_num + 1} — skipped ({e})")
+            continue
 
     return courses_students, diploma_students, student_data
 
@@ -130,19 +194,21 @@ def create_excel_file(diploma_students, courses_students):
 
     row = 2
     for student, subjects in diploma_students.items():
-        fname, lname = student.split(" ", 1)
+        parts = student.split(" ", 1)
+        fname = parts[0]
+        lname = parts[1] if len(parts) > 1 else ""
         worksheet.write(row, 0, fname)
         worksheet.write(row, 1, lname)
         col = 2
         for subject, grade in subjects.items():
             if subject[-2:] not in ["EE", "TK"]:
-                worksheet.write(row, col, int(grade))
+                worksheet.write(row, col, _safe_int(grade))
                 col += 1
             elif subject[-2:] == "EE":
                 worksheet.write(row, 9, grade)
             elif subject[-2:] == "TK":
                 worksheet.write(row, 8, grade)
-        
+
         row += 1
 
     worksheet.merge_range(f'A{row+1}:M{row+1}', 'Courses Students', merge_format)
@@ -151,12 +217,14 @@ def create_excel_file(diploma_students, courses_students):
 
     row += 2
     for student, subjects in courses_students.items():
-        fname, lname = student.split(" ", 1)
+        parts = student.split(" ", 1)
+        fname = parts[0]
+        lname = parts[1] if len(parts) > 1 else ""
         worksheet.write(row, 0, fname)
         worksheet.write(row, 1, lname)
         col = 2
         for subject, grade in subjects.items():
-            worksheet.write(row, col, int(grade))
+            worksheet.write(row, col, _safe_int(grade))
             col += 1
         row += 1
 
@@ -167,7 +235,7 @@ def create_excel_file(diploma_students, courses_students):
 # ------------------ Analytics Logic ------------------ #
 
 def calculate_bonus(tok, ee):
-    tok, ee = tok.strip().upper(), ee.strip().upper()
+    tok, ee = str(tok).strip().upper(), str(ee).strip().upper()
     bonus_3 = {("A", "A"), ("A", "B"), ("B", "A")}
     bonus_2 = {("B", "B"), ("A", "C"), ("C", "A"), ("A", "D"), ("D", "A"), ("B", "C"), ("C", "B")}
     bonus_1 = {("B", "D"), ("D", "B"), ("C", "C")}
@@ -207,7 +275,7 @@ def get_average_subject_score(students, is_diploma):
         return total_score / count if count else 0
 
 # ------------------ Streamlit App ------------------ #
-st.title("📚 IB Results Extractor to Excel")
+st.title("🧮 IB Results Extractor")
 
 uploaded_file = st.file_uploader("Upload a Candidate Results PDF", type=["pdf"])
 if uploaded_file:

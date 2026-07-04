@@ -1,5 +1,3 @@
-streamlit
-pandas
-altair
+flask
 PyPDF2
 XlsxWriter
